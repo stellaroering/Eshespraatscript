@@ -1,0 +1,229 @@
+########################################################################
+#Extract speaker                                                       #
+#Identify S and SH                                                     #
+###Keep track of target word                                           #
+###Keep track of sequence                                              #
+######Keep track of Repetitions                                        #
+#Extract onset and offset time                                         #
+#Calculate duration                                                    #
+#Extract CoG                                                           #
+#Export to csv
+# Written by Stella and Bess                                           #
+########################################################################
+
+
+# clear info box
+clearinfo
+
+# set directory
+directory$ = "C:\Users\uo_sp\OneDrive\Desktop\UOSLRL_es-esh-COG-extraction\"
+
+
+# set es-esh table
+header_row$ = "SpeakerID" + tab$ + "Repetition" + tab$ + "Sequence" + tab$ + "Target_Word" + tab$ + "Fricative" + tab$ + "Onset_Time" + tab$ + "Duration" + tab$ + "CoG"
+header_row$ > 'directory$'es-esh.csv
+
+# list of tg files in directory
+tg_strings = Create Strings as file list: "tg_list", directory$ + "/*.TextGrid"
+num_tg_files = Get number of strings
+
+# initializing variables
+onset = 0
+offset = 0
+
+# set rep table
+rep_table = Create Table with column names: "rep_table", 0, "rep"
+
+
+
+
+procedure fricative: num_of_interval
+	## function that takes the number of the interval on tier two (phones) that contains a fricative
+	## "returns" onset and duration of the fricative, the target word, the fricative type, and centre of gravity
+
+	# get onset & duration
+	onset = Get starting point... 2 'num_of_interval'
+	offset = Get end point... 2 'num_of_interval'
+	duration = offset - onset
+	# if want in ms * 1000
+
+	# get target
+	target_num = Get interval at time: 1, onset
+	target$ = Get label of interval: 1, target_num
+
+	# get fricative
+	fric$ = Get label of interval: 2, num_of_interval
+
+	# get CoG
+	
+	# select sound
+	Read from file: directory$ + speakerID$ + ".wav"
+	audio_name$ = selected$ ("Sound")
+
+	# extracts fricative as sound part object
+	Extract part: onset, offset, "rectangular", 1, "yes"
+	sound_name$ = "Sound " + audio_name$ + "_part"
+	selectObject: sound_name$
+	
+	# changes sound part object to spectrum
+	To Spectrum: "yes"
+	spectrum_name$ = "Spectrum " + audio_name$ + "_part"
+	selectObject: spectrum_name$
+
+	#change this number if you want to change the power of the CoG
+	cog$ = Get centre of gravity: 2
+	cog = number (cog$)
+
+	# clean up objects
+	removeObject: spectrum_name$
+	removeObject: sound_name$
+	removeObject: "Sound " + audio_name$
+endproc
+
+
+
+
+
+# for-loop that iterates over all tg files in the list
+for j from 1 to num_tg_files
+
+	# reads in tg
+	selectObject: "Strings tg_list"
+	current_tg_file$ = Get string: j
+
+	Read from file: directory$ + current_tg_file$
+	tg_name$ = selected$ ("TextGrid")
+
+	# gets speakerID
+	speakerID$ = tg_name$ - ".TextGrid"
+
+	# loops through every interval in tier two (phones)
+	num_of_intervals2 = Get number of intervals: 2
+	for z from 1 to num_of_intervals2
+		phones$ = Get label of interval: 2, z
+
+			# checks to see if interval is an SH and then calls the fricative function
+			if (phones$ == "SH")
+				@fricative: z
+				
+				# saves variables that are "returned" from the function
+				onsetSH = onset
+				durationSH = duration
+				targetSH$ = target$
+				fricSH$ = fric$
+				cogSH = cog
+
+				# reselects tg object
+				selectObject: "TextGrid " + speakerID$
+
+				# gets S data
+
+				# goes back one interval from SH
+				interval_numS = z - 1
+				
+				# initializes a counter and stopping criteria
+				counter = 0
+				end = 0
+
+				# "while" loop that repeats until finds an S, goes back too far (4), or silence length is longer than 2s
+				repeat
+					# continues to loop back by one
+					interval_numS = interval_numS - 1
+
+					# checks that interval isn't at the beginning of the file
+					if interval_numS <> 0
+						fric$ = Get label of interval: 2, interval_numS
+
+						# increases counter for loop
+						counter = counter + 1
+
+						# checks if interval is empty
+						if (fric$ == "")
+
+							# checks duration of empty interval
+							onset_empty = Get starting point... 2 'interval_numS'
+							offset_empty = Get end point... 2 'interval_numS'
+							duration_empty = offset_empty - onset_empty
+
+							# checks if empty interval is longer than 2s
+							if (duration_empty >= 2)
+
+								# built in break statement
+								end = 1
+							endif
+						endif
+					endif
+				until (fric$ == "S") or (counter == 4) or (end == 1) or (interval_numS == 0)
+
+
+				# if above "while" loop stopped because it found an S, add into data, else starts another iteration
+				if (fric$ == "S")
+
+					# calls function for S
+					@fricative: interval_numS
+
+					# saves variables that were "returned"
+					onsetS = onset
+					durationS = duration
+					targetS$ = target$
+					targetnumS = target_num
+					fricS$ = fric$
+					cogS = cog
+
+					# reselects tg
+					selectObject: "TextGrid " + speakerID$
+
+					# gets sequence
+
+					# "while" loop that looks back continuously until reaches a filled interval
+					repeat
+						targetnumS = targetnumS - 1
+
+						# collects the word from filled interval as first word in the sequence
+						seq1$ = Get label of interval: 1, targetnumS
+					until seq1$ <> ""
+
+					# checks if seq1 doesn't start with S or SH
+
+					# could probably change this to and, but works as is
+					# counter for built in break statement
+					counter_letter = 0
+
+					# gets first letter from seq1$ and first two letters from seq1$
+					first_letter$ = left$ (seq1$, 1)
+					second_letters$ = left$ (seq1$, 2)
+
+					# if the beginning letters are not s or ch then creates sequence
+					if (first_letter$ <> "s") and (second_letters$ <> "ch")
+						sequence$ = seq1$ + " " + targetS$ + " " + targetSH$
+
+						# appends sequence to table to get repetition
+						selectObject: "Table rep_table"
+						Append row
+						current_row = Get number of rows
+						Set string value: current_row, "rep", seq1$
+
+						# if first time through the loop, rep is set to 1
+						if current_row == 1
+							rep = 1
+						else
+							# looks at previous repetition (from table)
+							prevrep$ = Get value: (current_row - 1), "rep"
+
+							# if prevrep is the same as current rep adds one to repetition, if not resets to 1
+							if prevrep$ == seq1$
+								rep = rep + 1
+							else
+								rep = 1
+							endif
+						endif
+							
+						# appends everything to csv
+						fileappend "es-esh.csv" 'newline$''speakerID$''tab$''rep''tab$''sequence$''tab$''targetS$''tab$''fricS$''tab$''onsetS:3''tab$''durationS:3''tab$''cogS:3'
+						fileappend "es-esh.csv" 'newline$''speakerID$''tab$''rep''tab$''sequence$''tab$''targetSH$''tab$''fricSH$''tab$''onsetSH:3''tab$''durationSH:3''tab$''cogSH:3'
+						selectObject: "TextGrid " + tg_name$
+					endif
+				endif
+			endif
+	endfor
+endfor
